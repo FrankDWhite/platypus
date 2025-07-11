@@ -281,7 +281,7 @@ if __name__ == "__main__":
 
             inserted_documents = options_db.find_by_ids(inserted_ids_from_chain)
             
-            if not market_open:
+            if market_open:
                 normalization_db.update_running_stats(inserted_documents)
 
             for doc in inserted_documents:
