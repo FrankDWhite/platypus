@@ -4,6 +4,7 @@ import requests
 import pandas
 import pprint
 
+from embedding_utils import TICKER_VOCABULARY
 from models import OptionChainResponse
 from mongodb_utilities import OptionsRawDataStore
 from normalization_stats import RunningStatsDB
@@ -113,17 +114,14 @@ class AccountsTrading:
     def get_options(self, symbol):
         if self.access_token:
             today = date.today()
-            from_date = today.strftime("%Y-%m-%d")
-            seven_days_from_now = today + timedelta(days=7)
-            to_date = seven_days_from_now.strftime("%Y-%m-%d")
+            fourteen_days_from_now = today + timedelta(days=14)
+            to_date = fourteen_days_from_now.strftime("%Y-%m-%d")
             params = {
                 "symbol": symbol,
                 "contractType": "ALL",
                 "strikeCount": 10,
-                "fromDate": from_date,
                 "toDate": to_date,
                 "includeUnderlyingQuote": "true"
-
             }
             quote_url = f"https://api.schwabapi.com/marketdata/v1/chains"
             try:
@@ -216,79 +214,106 @@ class AccountsTrading:
 
 if __name__ == "__main__":
     trading_client = AccountsTrading()
-    if trading_client.account_hash_value:
-        print(f"Account Hash Value: {trading_client.account_hash_value}")
-        # Now you can use other methods in the AccountsTrading class
-        # to make further API calls using trading_client
-        stock_symbol = "AMZN"  # Replace with the symbol you want
+    if not trading_client.account_hash_value:
+        print("Failed to retrieve account hash value. Exiting.")
+        exit()
+    
+    # Initialize database connections once, outside the loop
+    options_db = OptionsRawDataStore()
+    normalization_db = RunningStatsDB()
+
+    if not options_db.client or not normalization_db.client:
+        print("Exiting due to MongoDB connection failure.")
+        exit()
+    
+    # Create the compound index (idempotent operation)
+    options_db.create_compound_index()
+    
+    # Check market hours once
+    market_hours = trading_client.get_market_hours()
+    if not market_hours:
+        print("Exiting due to failure fetching market hours.")
+        exit()
+    
+    market_open = trading_client.is_market_open(market_hours)
+    print(f"Is the market open? {market_open}")
+
+    # --- MAIN CHANGE: Loop through all target stocks ---
+    for stock_symbol in TICKER_VOCABULARY:
+        print(f"\n{'='*20} Processing: {stock_symbol} {'='*20}")
+        
         quote_data = trading_client.get_options(stock_symbol)
-        if quote_data:
-            # print(f"Quote for {stock_symbol}:")
-            # pprint.pprint(quote_data)
+        if not quote_data:
+            print(f"Failed to get options data for {stock_symbol}. Skipping.")
+            continue
+
+        try:
             option_chain = OptionChainResponse.model_validate(quote_data)
             print(f"Successfully parsed data for symbol: {option_chain.symbol}")
-            print(f"Underlying asset description: {option_chain.underlying.description}")
-            # print(f"Expiration Date: {option_chain.callExpDateMap['2025-07-03:0']['222.5'][0].expirationDate}")
-                # 1. Initialize the data store utility
-            options_db = OptionsRawDataStore()
-            normalization_db = RunningStatsDB()
-
-            # Check connection
-            if not options_db.client:
-                print("Exiting due to MongoDB connection failure.")
-                exit()
-
-            market_hours = trading_client.get_market_hours()
-            if not market_hours:
-                print("Exiting due to failure fetching market hours.")
-                exit()
-            print(f"market_hours {market_hours}")
+        except Exception as e:
+            print(f"Pydantic validation error for {stock_symbol}: {e}. Skipping.")
+            continue
+        
+        # Insert the data into the raw data store
+        inserted_ids_from_chain = options_db.insert_option_chain_response(option_chain, market_open)
+        if not inserted_ids_from_chain:
+            print(f"No documents were inserted for {stock_symbol}. Skipping.")
+            continue
             
-            market_open = trading_client.is_market_open(market_hours)
+        print(f"Successfully inserted {len(inserted_ids_from_chain)} documents for {stock_symbol}.")
+        
+        # Find the newly inserted documents to prepare for normalization
+        inserted_documents = options_db.find_by_ids(inserted_ids_from_chain)
+        
+        # Only update stats and normalize if the market is open and we have new documents
+        if market_open and inserted_documents:
+            print(f"Market is open. Updating normalization stats for {stock_symbol}...")
+            normalization_db.update_running_stats(inserted_documents)
 
-            print(f"is market open? {market_open}")
-
-            # 2. Create the compound index (idempotent operation)
-            options_db.create_compound_index()
-            inserted_ids_from_chain = options_db.insert_option_chain_response(option_chain, market_open)
-            print(f"Successfully inserted {len(inserted_ids_from_chain)} documents from OptionChainResponse.")
-
-            inserted_documents = options_db.find_by_ids(inserted_ids_from_chain)
-            
-            if market_open:
-                normalization_db.update_running_stats(inserted_documents)
-
+            # Normalize each new document and update it in the database
             for doc in inserted_documents:
-                if (doc["optionType"] == "CALL"):
-                    normalized_values = normalize_option_data(doc, normalization_db.get_running_stats(stock_symbol, "CALL"))
-                else:
-                    normalized_values = normalize_option_data(doc, normalization_db.get_running_stats(stock_symbol, "PUT"))
+                option_type = doc.get("optionType")
+                if not option_type:
+                    continue
+
+                # Get the latest running stats for this specific symbol and type
+                running_stats = normalization_db.get_running_stats(stock_symbol, option_type)
+                if not running_stats:
+                    print(f"Warning: No running stats found for {stock_symbol} {option_type}.")
+                    continue
+                
+                # Perform normalization and update the document
+                normalized_values = normalize_option_data(doc, running_stats)
                 options_db.update_normalized_data(doc["_id"], normalized_values)
-
-            # all_documents_scanned = options_db.scan_all_documents(limit=20, sort_key="intervalTimestamp", sort_order=DESCENDING)
-            # for i, doc in enumerate(all_documents_scanned):
-            #     print(f"\n  --- Document {i+1} ---")
-            #     for key, value in doc.items():
-            #         # Special handling for datetime objects to make them readable
-            #         if isinstance(value, datetime):
-            #             print(f"    {key}: {value.isoformat()}")
-            #         elif isinstance(value, dict):
-            #             print(f"    {key}:")
-            #             for sub_key, sub_value in value.items():
-            #                 print(f"      {sub_key}: {sub_value}")
-            #         else:
-            #             print(f"    {key}: {value}")
-                      
-            # delete_older_than = datetime(2025, 7, 11, 0, 37, 10, tzinfo=timezone.utc)
-
-            # deleted_count = options_db.delete_old_documents(delete_older_than)
-            options_db.close_connection()
-
-            # print(f"Function reported {deleted_count} documents deleted.")
-            # normalization_db.clear_running_stats()
-            normalization_db.close_connection()
             
-        else:
-            print(f"Failed to get quote for {stock_symbol}.")
-    else:
-        print("Failed to retrieve account hash value.")
+            print(f"Finished normalization for {stock_symbol}.")
+
+    print("\n--- All stocks processed. ---")
+
+    options_db.close_connection()
+    normalization_db.close_connection()
+    print("Database connections closed.")
+# MISC UTILS 
+
+# all_documents_scanned = options_db.scan_all_documents(limit=20, sort_key="intervalTimestamp", sort_order=DESCENDING)
+# for i, doc in enumerate(all_documents_scanned):
+#     print(f"\n  --- Document {i+1} ---")
+#     for key, value in doc.items():
+#         # Special handling for datetime objects to make them readable
+#         if isinstance(value, datetime):
+#             print(f"    {key}: {value.isoformat()}")
+#         elif isinstance(value, dict):
+#             print(f"    {key}:")
+#             for sub_key, sub_value in value.items():
+#                 print(f"      {sub_key}: {sub_value}")
+#         else:
+#             print(f"    {key}: {value}")
+            
+# delete_older_than = datetime(2025, 7, 11, 0, 37, 10, tzinfo=timezone.utc)
+
+# deleted_count = options_db.delete_old_documents(delete_older_than)
+
+# print(f"Function reported {deleted_count} documents deleted.")
+# normalization_db.clear_running_stats()
+
+
