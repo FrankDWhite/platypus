@@ -132,10 +132,10 @@ class OptionsRawDataStore:
                 {"_id": object_id},
                 {"$set": {"normalizedData": normalized_list}}
             )
-            if result.modified_count > 0:
-                print(f"Successfully updated document with _id: {doc_id} with normalized data.")
-            else:
-                print(f"Could not find document with _id: {doc_id} to update.")
+            # if result.modified_count > 0:
+            #     print(f"Successfully updated document with _id: {doc_id} with normalized data.")
+            # else:
+            #     print(f"Could not find document with _id: {doc_id} to update.")
         except pymongo.errors.PyMongoError as e:
             print(f"Error updating document with normalized data: {e}")
         except Exception as e:

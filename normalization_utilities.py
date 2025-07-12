@@ -24,12 +24,12 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
     volatility = document.get("impliedVolatility", 0) # Assuming this is a percentage value
     intrinsic_value_per_share = document.get("intrinsicValue", 0)
     extrinsic_value_per_share = document.get("extrinsicValue", 0)
-    description = document.get("overallDescription", "")
+    # description = document.get("overallDescription", "")
 
 
-    print(f"\n \n ----- DESCRIPTION = {description} -----")
+    # print(f"\n \n ----- DESCRIPTION = {description} -----")
 
-    print(f"\n \n ----- stats from db is = {stats_from_db} -----")
+    # print(f"\n \n ----- stats from db is = {stats_from_db} -----")
 
 
     normalized_features = []
@@ -44,7 +44,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for optionPriceRatioToUnderlying")
         normalized_value = option_price_ratio_to_underlying
     normalized_features.append(normalized_value)
-    print(f"Option price ratio to underlying stock price {normalized_value}")
+    # print(f"Option price ratio to underlying stock price {normalized_value}")
 
     # 2. Option price ratio to intrinsic value
     intrinsic_value_total = max(0, intrinsic_value_per_share * 100)
@@ -57,7 +57,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for optionPriceRatioToIntrinsicValue")
         normalized_value = option_price_ratio_to_intrinsic_value
     normalized_features.append(normalized_value)
-    print(f"Option price ratio to intrinsic value {normalized_value}")
+    # print(f"Option price ratio to intrinsic value {normalized_value}")
 
     # 3. Option price ratio to extrinsic value
     extrinsic_value_total = max(0, extrinsic_value_per_share * 100)
@@ -70,7 +70,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for optionPriceRatioToExtrinsicValue")
         normalized_value = option_price_ratio_to_extrinsic_value
     normalized_features.append(normalized_value)
-    print(f"Option price ratio to extrinsic value {normalized_value}")
+    # print(f"Option price ratio to extrinsic value {normalized_value}")
 
     # 4. Strike price ratio to underlying stock price
     strike_price_ratio_to_underlying = strike_price / (underlying_price + 1e-6)
@@ -82,7 +82,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for strikePriceRatioToUnderlying")
         normalized_value = strike_price_ratio_to_underlying
     normalized_features.append(normalized_value)
-    print(f"Strike price ratio to underlying stock price {normalized_value}")
+    # print(f"Strike price ratio to underlying stock price {normalized_value}")
 
     # 5. Strike price ratio to option price
     strike_price_ratio_to_option_price = strike_price / (option_price + 1e-6) if option_price > 0 else 0
@@ -94,7 +94,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for strikePriceRatioToOptionPrice")
         normalized_value = strike_price_ratio_to_option_price
     normalized_features.append(normalized_value)
-    print(f"Strike price ratio to option price {normalized_value}")
+    # print(f"Strike price ratio to option price {normalized_value}")
 
     # 6. Volatility
     if "volatility" in stats_from_db:
@@ -105,7 +105,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for volatility")
         normalized_value = volatility
     normalized_features.append(normalized_value)
-    print(f"Volatility {normalized_value}")
+    # print(f"Volatility {normalized_value}")
 
     # 7. Theta
     if "theta" in stats_from_db:
@@ -116,7 +116,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for theta")
         normalized_value = theta
     normalized_features.append(normalized_value)
-    print(f"theta {normalized_value}")
+    # print(f"theta {normalized_value}")
 
     # 8. Vega
     if "vega" in stats_from_db:
@@ -127,7 +127,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for vega")
         normalized_value = vega
     normalized_features.append(normalized_value)
-    print(f"vega {normalized_value}")
+    # print(f"vega {normalized_value}")
 
     # 9. Gamma
     if "gamma" in stats_from_db:
@@ -138,7 +138,7 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for gamma")
         normalized_value = gamma
     normalized_features.append(normalized_value)
-    print(f"gamma {normalized_value}")
+    # print(f"gamma {normalized_value}")
 
     # 10. Volume (Logarithmic base 10)
     log10_volume = 0
@@ -152,12 +152,12 @@ def normalize_option_data(document, stats_from_db: dict[str, dict]):
         print("stats not found for volume")
         normalized_value = log10_volume
     normalized_features.append(normalized_value)
-    print(f"volume {normalized_value}")
+    # print(f"volume {normalized_value}")
 
     # 11. Hours to expiration
     two_weeks_in_hours = 7 * 24 * 2.0
     hours_to_expiration_norm = hours_to_expiration / two_weeks_in_hours
     normalized_features.append(hours_to_expiration_norm)
-    print(f"Hours to expiration {hours_to_expiration_norm}")
+    # print(f"Hours to expiration {hours_to_expiration_norm}")
 
     return np.array(normalized_features)
