@@ -262,14 +262,17 @@ if __name__ == "__main__":
             
         print(f"Successfully inserted {len(inserted_ids_from_chain)} documents for {stock_symbol}.")
         
-        # Find the newly inserted documents to prepare for normalization
+       # Find the newly inserted documents to prepare for normalization
         inserted_documents = options_db.find_by_ids(inserted_ids_from_chain)
         
-        # Only update stats and normalize if the market is open and we have new documents
+        # Only update the running statistics if the market is open
         if market_open and inserted_documents:
             print(f"Market is open. Updating normalization stats for {stock_symbol}...")
             normalization_db.update_running_stats(inserted_documents)
 
+        # Always attempt to normalize the new documents, regardless of market status
+        if inserted_documents:
+            print(f"Normalizing {len(inserted_documents)} new documents for {stock_symbol}...")
             # Normalize each new document and update it in the database
             for doc in inserted_documents:
                 option_type = doc.get("optionType")
@@ -279,7 +282,7 @@ if __name__ == "__main__":
                 # Get the latest running stats for this specific symbol and type
                 running_stats = normalization_db.get_running_stats(stock_symbol, option_type)
                 if not running_stats:
-                    print(f"Warning: No running stats found for {stock_symbol} {option_type}.")
+                    print(f"Warning: No running stats found for {stock_symbol} {option_type}. Cannot normalize.")
                     continue
                 
                 # Perform normalization and update the document
