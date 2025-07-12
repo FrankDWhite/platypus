@@ -1,4 +1,4 @@
-#!/usr/bin/ python3.10
+#!/usr/bin/python3.10
 
 from datetime import datetime, timedelta, timezone
 from mongodb_utilities import OptionsRawDataStore

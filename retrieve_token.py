@@ -1,4 +1,4 @@
-#!/usr/bin/ python3.10
+#!/usr/bin/python3.10
 
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from datetime import date, datetime, timedelta, timezone
