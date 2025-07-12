@@ -252,32 +252,6 @@ if __name__ == "__main__":
             options_db.create_compound_index()
             inserted_ids_from_chain = options_db.insert_option_chain_response(option_chain, market_open)
             print(f"Successfully inserted {len(inserted_ids_from_chain)} documents from OptionChainResponse.")
-            
-            # now = datetime.now(timezone.utc)
-
-            # remainder = now.minute % 5
-            # if remainder >= 3:
-            #     round_to = 5 - remainder
-            #     end_timestamp = now.replace(minute=(now.minute + round_to) % 60, second=0, microsecond=0)
-            #     if (now.minute + round_to) >= 60:
-            #         end_timestamp += timedelta(hours=1)
-            # else:
-            #     round_to = -remainder
-            #     end_timestamp = now.replace(minute=now.minute + round_to, second=0, microsecond=0)
-
-            # start_timestamp = end_timestamp - timedelta(minutes=195) # 3.25 hours = 195 minutes
-            # limit = 40
-
-            # time_series_data = options_db.find_option_contract_time_series(
-            #     symbol="AMZN",
-            #     expiration_date=datetime(2025, 7, 11, 0, 0, 0),
-            #     strike_price=222.5,
-            #     option_type="PUT",
-            #     start_timestamp=start_timestamp,
-            #     end_timestamp=end_timestamp,
-            #     limit=limit,
-            #     sort_order=ASCENDING
-            # )
 
             inserted_documents = options_db.find_by_ids(inserted_ids_from_chain)
             
@@ -291,30 +265,28 @@ if __name__ == "__main__":
                     normalized_values = normalize_option_data(doc, normalization_db.get_running_stats(stock_symbol, "PUT"))
                 options_db.update_normalized_data(doc["_id"], normalized_values)
 
-
-            all_documents_scanned = options_db.scan_all_documents(limit=20, sort_key="intervalTimestamp", sort_order=DESCENDING)
-            for i, doc in enumerate(all_documents_scanned):
-                print(f"\n  --- Document {i+1} ---")
-                for key, value in doc.items():
-                    # Special handling for datetime objects to make them readable
-                    if isinstance(value, datetime):
-                        print(f"    {key}: {value.isoformat()}")
-                    elif isinstance(value, dict):
-                        print(f"    {key}:")
-                        for sub_key, sub_value in value.items():
-                            print(f"      {sub_key}: {sub_value}")
-                    else:
-                        print(f"    {key}: {value}")
+            # all_documents_scanned = options_db.scan_all_documents(limit=20, sort_key="intervalTimestamp", sort_order=DESCENDING)
+            # for i, doc in enumerate(all_documents_scanned):
+            #     print(f"\n  --- Document {i+1} ---")
+            #     for key, value in doc.items():
+            #         # Special handling for datetime objects to make them readable
+            #         if isinstance(value, datetime):
+            #             print(f"    {key}: {value.isoformat()}")
+            #         elif isinstance(value, dict):
+            #             print(f"    {key}:")
+            #             for sub_key, sub_value in value.items():
+            #                 print(f"      {sub_key}: {sub_value}")
+            #         else:
+            #             print(f"    {key}: {value}")
                       
-            delete_older_than = datetime(2025, 7, 11, 0, 37, 10, tzinfo=timezone.utc)
+            # delete_older_than = datetime(2025, 7, 11, 0, 37, 10, tzinfo=timezone.utc)
 
-            deleted_count = options_db.delete_old_documents(delete_older_than)
+            # deleted_count = options_db.delete_old_documents(delete_older_than)
             options_db.close_connection()
 
-            print(f"Function reported {deleted_count} documents deleted.")
-            normalization_db.clear_running_stats()
+            # print(f"Function reported {deleted_count} documents deleted.")
+            # normalization_db.clear_running_stats()
             normalization_db.close_connection()
-
             
         else:
             print(f"Failed to get quote for {stock_symbol}.")

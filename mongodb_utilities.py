@@ -86,52 +86,6 @@ class OptionsRawDataStore:
         except pymongo.errors.PyMongoError as e:
             print(f"Error creating index: {e}")
 
-    # # --- Sharding Management Functions (Run against mongos router) ---
-    # def enable_sharding_on_database(self):
-    #     """
-    #     Enables sharding for the specified database.
-    #     This command must be run against the 'admin' database on a mongos router.
-    #     """
-    #     if not self.client:
-    #         print("Not connected to MongoDB.")
-    #         return
-
-    #     try:
-    #         admin_db = self.client.admin
-    #         # Starting in MongoDB 6.0, this command is not strictly required to shard a collection
-    #         # but it explicitly marks the database as sharding-enabled.
-    #         # It also ensures the database exists if it didn't.
-    #         result = admin_db.command({'enableSharding': self.db_name})
-    #         print(f"Enabled sharding on database '{self.db_name}': {result}")
-    #     except pymongo.errors.PyMongoError as e:
-    #         print(f"Error enabling sharding on database '{self.db_name}': {e}")
-    #         print("Ensure you are connected to a mongos router and have admin privileges.")
-
-    # def shard_collection(self):
-    #     """
-    #     Shards the collection using the defined shard key.
-    #     This command must be run against the 'admin' database on a mongos router.
-    #     The collection must have an index that *starts* with the shard key.
-    #     """
-    #     if not self.client:
-    #         print("Not connected to MongoDB.")
-    #         return
-
-    #     try:
-    #         admin_db = self.client.admin
-    #         full_collection_name = f"{self.db_name}.{self.collection_name}"
-    #         shard_key = {
-    #             "underlyingSymbol": ASCENDING,
-    #             "expirationDate": ASCENDING,
-    #             "strikePrice": ASCENDING,
-    #             "optionType": ASCENDING
-    #         }
-    #         result = admin_db.command({'shardCollection': full_collection_name, 'key': shard_key})
-    #         print(f"Sharded collection '{full_collection_name}' with key {shard_key}: {result}")
-    #     except pymongo.errors.PyMongoError as e:
-    #         print(f"Error sharding collection '{full_collection_name}': {e}")
-    #         print("Ensure the collection exists, the compound index is created, and you are connected to a mongos router.")
-
     # --- Write Operations ---
 
     def insert_many_option_data(self, data_list: list[dict]):
