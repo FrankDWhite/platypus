@@ -9,13 +9,18 @@ from typing import List, Dict, Tuple
 from embedding_utils import get_ticker_encoding, get_option_type_encoding
 
 # --- Configuration ---
-MONGO_URI = "mongodb://localhost:27017/"
-DB_NAME = "options_raw_data"
-COLLECTION_NAME = "option_intervals"
-HOURS_TO_PROCESS = 24
-LABELING_WINDOW_HOURS = 3.25
-LABELING_WINDOW_POINTS = 39 # 3.25 hours * (60 minutes / 5 minutes)
-TIME_SERIES_LENGTH = 40 # 39 future points for labeling + 1 current point
+# We need to look back further to build our feature + label windows
+HOURS_TO_PROCESS = 48
+
+# Window for input features (3.25 hours of past data + current point)
+FEATURE_WINDOW_POINTS = 40
+
+# Window for calculating the label (3.25 hours of future data)
+LABELING_WINDOW_POINTS = 39
+
+# Total contiguous points needed to create one training example
+TOTAL_WINDOW_SIZE = FEATURE_WINDOW_POINTS + LABELING_WINDOW_POINTS
+
 
 def get_unique_contracts(db_collection, start_time: datetime) -> List[Dict]:
     """
@@ -84,14 +89,13 @@ def process_daily_data():
     """
     Main function to fetch, process, and save data to a parquet file.
     """
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    collection = db[COLLECTION_NAME]
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["options_raw_data"]
+    collection = db["option_intervals"]
     print("Successfully connected to MongoDB.")
 
     now_utc = datetime.now(timezone.utc)
     start_time = now_utc - timedelta(hours=HOURS_TO_PROCESS)
-    processing_cutoff_time = now_utc - timedelta(hours=LABELING_WINDOW_HOURS)
 
     unique_contracts = get_unique_contracts(collection, start_time)
     
@@ -104,27 +108,40 @@ def process_daily_data():
     for i, contract in enumerate(unique_contracts):
         print(f"\nProcessing contract {i+1}/{len(unique_contracts)}: {contract['underlyingSymbol']} {contract['strikePrice']} {contract['optionType']}")
         
-        # --- Use the new utility to check if the ticker is in our list ---
         ticker_encoding = get_ticker_encoding(contract["underlyingSymbol"])
-        if ticker_encoding == 0: # Skip if the ticker is not in our vocabulary
+        if ticker_encoding == 0:
             print(f"  -> Skipping, ticker {contract['underlyingSymbol']} not in vocabulary.")
             continue
 
-        time_series = fetch_contract_time_series(collection, contract, start_time, processing_cutoff_time)
+        # Fetch all available recent data for the contract
+        time_series = fetch_contract_time_series(collection, contract, start_time, now_utc)
 
-        if len(time_series) < TIME_SERIES_LENGTH:
-            print(f"  -> Skipping, not enough data points ({len(time_series)})")
+        # Check if we have enough data to form even one complete feature + label window
+        if len(time_series) < TOTAL_WINDOW_SIZE:
+            print(f"  -> Skipping, not enough data points ({len(time_series)}) to form a full {TOTAL_WINDOW_SIZE}-point window.")
             continue
             
-        for i in range(len(time_series) - TIME_SERIES_LENGTH + 1):
+        # Iterate through each possible "present" moment in the time series
+        # The range ensures there's enough data for a full look-back and look-forward
+        for i in range(FEATURE_WINDOW_POINTS - 1, len(time_series) - LABELING_WINDOW_POINTS):
             
-            training_window = time_series[i : i + TIME_SERIES_LENGTH]
-            current_data_point = training_window[0]
-            future_points_for_labeling = training_window[1:]
+            # --- Correctly Slice the Data ---
+            
+            # The INPUT features are the PAST data leading up to and including the present
+            feature_window = time_series[i - (FEATURE_WINDOW_POINTS - 1) : i + 1]
+            
+            # The LABEL is determined by what happens in the FUTURE, after the present
+            labeling_window = time_series[i + 1 : i + 1 + LABELING_WINDOW_POINTS]
 
-            time_series_data = [dp.get("normalizedData", []) for dp in training_window]
-            masking_array = [dp.get("maskWhenTraining", True) for dp in training_window]
+            # The "current" data point is the last one in our feature window
+            current_data_point = feature_window[-1]
 
+            # --- Assemble the Training Example ---
+
+            # Input features for the model
+            time_series_data = [dp.get("normalizedData", []) for dp in feature_window]
+            masking_array = [dp.get("maskWhenTraining", True) for dp in feature_window]
+            
             # If absolutely none of the datapoints for this time series occurred during market hours, don't bother training with it 
             if all(masking_array):
                 continue
@@ -138,14 +155,14 @@ def process_daily_data():
                 print("  -> Skipping a window due to missing current price.")
                 continue
 
-            profit_perc, loss_perc = label_data_point(current_price, future_points_for_labeling)
+            # The label_data_point function is now correctly given only future data
+            profit_perc, loss_perc = label_data_point(current_price, labeling_window)
 
-            # --- Use the utility to get integer encodings ---
             option_type_encoding = get_option_type_encoding(contract["optionType"])
 
             processed_data_rows.append({
-                "ticker_embedding": ticker_encoding, # Now an integer
-                "option_type_embedding": option_type_encoding, # Now an integer
+                "ticker_embedding": ticker_encoding,
+                "option_type_embedding": option_type_encoding,
                 "time_series_data": time_series_data,
                 "masking_array": masking_array,
                 "predicted_profit_percentage": profit_perc,
