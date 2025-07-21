@@ -169,67 +169,26 @@ class OptionsRawDataStore:
             print(f"Error querying documents by IDs: {e}")
             return []
 
-    # --- Read Operations ---
-    def find_option_contract_time_series(
-        self,
-        symbol: str,
-        expiration_date: datetime,
-        strike_price: float,
-        option_type: str,
-        start_timestamp: datetime = None,
-        end_timestamp: datetime = None,
-        limit: int = 0,
-        sort_order: int = ASCENDING # 1 for ascending, -1 for descending
-    ) -> list[dict]:
+    def flag_document_as_labeled(self, doc_ids: list):
         """
-        Retrieves the full historical time series for a specific option contract.
-        Uses the composite 'partition key' and 'sort key' for efficient querying.
+        Updates documents to mark them as having been used for labeling.
 
         Args:
-            symbol (str): Underlying stock symbol (e.g., "AAPL").
-            expiration_date (datetime): Expiration date of the option (UTC).
-            strike_price (float): Strike price of the option.
-            option_type (str): Type of option ("CALL" or "PUT").
-            start_timestamp (datetime, optional): Start of the time range (inclusive).
-            end_timestamp (datetime, optional): End of the time range (inclusive).
-            limit (int, optional): Maximum number of documents to return. 0 means no limit.
-            sort_order (int, optional): Sort order for intervalTimestamp (1 for ASC, -1 for DESC).
-
-        Returns:
-            list[dict]: A list of matching option data documents.
+            doc_ids (list): A list of ObjectId instances to update.
         """
-        if self.client is None or self.collection is None:
-            print("Collection not initialized. Cannot query.")
-            return []
-
-        query = {
-            "underlyingSymbol": symbol,
-            "expirationDate": expiration_date,
-            "strikePrice": strike_price,
-            "optionType": option_type,
-        }
-
-        # Add timestamp range filter if provided
-        if start_timestamp or end_timestamp:
-            query["intervalTimestamp"] = {}
-            if start_timestamp:
-                query["intervalTimestamp"]["$gte"] = start_timestamp
-            if end_timestamp:
-                query["intervalTimestamp"]["$lte"] = end_timestamp
-
-        try:
-            cursor = self.collection.find(query).sort("intervalTimestamp", sort_order)
-            if limit > 0:
-                cursor = cursor.limit(limit)
-
-            results = list(cursor)
-            print(f"Found {len(results)} documents for contract {symbol}/{strike_price}/{option_type}/{expiration_date}.")
-            return results
-        except pymongo.errors.PyMongoError as e:
-            print(f"Error querying documents: {e}")
-            return []
+        if self.collection is None or not doc_ids:
+            return 0
         
-
+        try:
+            result = self.collection.update_many(
+                {"_id": {"$in": doc_ids}},
+                {"$set": {"hasBeenLabeled": True}}
+            )
+            print(f"Flagged {result.modified_count} documents as labeled.")
+            return result.modified_count
+        except pymongo.errors.PyMongoError as e:
+            print(f"Error flagging documents as labeled: {e}")
+            return 0
 
         # --- New Function: Ingest OptionChainResponse ---
     def insert_option_chain_response(self, option_chain_response: OptionChainResponse, market_open):
@@ -350,7 +309,8 @@ class OptionsRawDataStore:
 
                             "maskWhenTraining": not market_open,
                             "normalizedData" : { },
-                            "intervalTimestamp": interval_timestamp, # Our generated timestamp
+                            "intervalTimestamp": interval_timestamp,
+                            "hasBeenLabeled": False # New field
                         }
                         documents_to_insert.append(document)
 

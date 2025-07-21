@@ -2,7 +2,7 @@
 
 import polars as pl
 
-file_path = '/home/bcm/2025-07-15_options_training_data.parquet'
+file_path = '/home/bcm/training_data/2025-07-19_options_training_data.parquet'
 df = pl.read_parquet(file_path)
 
 

@@ -2,15 +2,19 @@
 import pandas as pd
 import pymongo
 from pymongo import MongoClient
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import List, Dict, Tuple
+import pytz
 
 # --- Import the new embedding utility ---
 from embedding_utils import get_ticker_encoding, get_option_type_encoding
+from mongodb_utilities import OptionsRawDataStore
+from pathlib import Path
 
 # --- Configuration ---
-# We need to look back further to build our feature + label windows
-HOURS_TO_PROCESS = 48
+# We need to look back further to build our feature + label windows.
+# Increased to 96 hours (4 days) to ensure we can wrap labeling over a weekend.
+HOURS_TO_PROCESS = 96
 
 # Window for input features (3.25 hours of past data + current point)
 FEATURE_WINDOW_POINTS = 40
@@ -18,8 +22,37 @@ FEATURE_WINDOW_POINTS = 40
 # Window for calculating the label (3.25 hours of future data)
 LABELING_WINDOW_POINTS = 39
 
-# Total contiguous points needed to create one training example
-TOTAL_WINDOW_SIZE = FEATURE_WINDOW_POINTS + LABELING_WINDOW_POINTS
+SAVE_DIRECTORY = Path("/home/bcm/training_data")
+
+
+def is_within_market_hours(dt_object: datetime) -> bool:
+    """
+    Checks if a datetime object is within regular US stock market hours.
+    (Monday-Friday, 8:30 AM to 3:00 PM Central Time)
+    This function now correctly handles naive datetimes from MongoDB by assuming they are in UTC.
+    Args:
+        dt_object (datetime): A datetime object, which can be naive (assumed UTC) or timezone-aware.
+    Returns:
+        bool: True if within market hours, False otherwise.
+    """
+    if not dt_object:
+        return False
+
+    # If the datetime from MongoDB is naive (tzinfo is None),
+    # we explicitly tell pytz that it represents UTC time.
+    if dt_object.tzinfo is None:
+        dt_object = pytz.utc.localize(dt_object)
+
+    central_tz = pytz.timezone('America/Chicago')
+    dt_central = dt_object.astimezone(central_tz)
+
+    if dt_central.weekday() > 4:  # Monday is 0, Sunday is 6
+        return False  # It's a weekend
+
+    market_open_time = time(8, 30)
+    market_close_time = time(15, 0)
+
+    return market_open_time <= dt_central.time() < market_close_time
 
 
 def get_unique_contracts(db_collection, start_time: datetime) -> List[Dict]:
@@ -75,7 +108,6 @@ def label_data_point(current_price: float, future_data_points: List[Dict]) -> Tu
         if price < min_price:
             min_price = price
             
-    # Avoid division by zero
     if current_price == 0:
         return 0.0, 0.0
 
@@ -89,9 +121,12 @@ def process_daily_data():
     """
     Main function to fetch, process, and save data to a parquet file.
     """
-    client = MongoClient("mongodb://localhost:27017/")
-    db = client["options_raw_data"]
-    collection = db["option_intervals"]
+    options_db = OptionsRawDataStore()
+    if not options_db.client:
+        print("Exiting due to MongoDB connection failure.")
+        return
+
+    collection = options_db.collection
     print("Successfully connected to MongoDB.")
 
     now_utc = datetime.now(timezone.utc)
@@ -113,37 +148,53 @@ def process_daily_data():
             print(f"  -> Skipping, ticker {contract['underlyingSymbol']} not in vocabulary.")
             continue
 
-        # Fetch all available recent data for the contract
         time_series = fetch_contract_time_series(collection, contract, start_time, now_utc)
 
-        # Check if we have enough data to form even one complete feature + label window
-        if len(time_series) < TOTAL_WINDOW_SIZE:
-            print(f"  -> Skipping, not enough data points ({len(time_series)}) to form a full {TOTAL_WINDOW_SIZE}-point window.")
+        if len(time_series) < FEATURE_WINDOW_POINTS:
+            print(f"  -> Skipping, not enough data points ({len(time_series)}) to form a feature window.")
             continue
+        
+        raw_options_data_entries_labeled = []
             
-        # Iterate through each possible "present" moment in the time series
-        # The range ensures there's enough data for a full look-back and look-forward
-        for i in range(FEATURE_WINDOW_POINTS - 1, len(time_series) - LABELING_WINDOW_POINTS):
+        for i in range(FEATURE_WINDOW_POINTS - 1, len(time_series)):
             
-            # --- Correctly Slice the Data ---
-            
-            # The INPUT features are the PAST data leading up to and including the present
             feature_window = time_series[i - (FEATURE_WINDOW_POINTS - 1) : i + 1]
-            
-            # The LABEL is determined by what happens in the FUTURE, after the present
-            labeling_window = time_series[i + 1 : i + 1 + LABELING_WINDOW_POINTS]
-
-            # The "current" data point is the last one in our feature window
             current_data_point = feature_window[-1]
 
-            # --- Assemble the Training Example ---
+            # --- Ensure the point we are labeling is itself from within market hours ---
+            current_timestamp = current_data_point.get("intervalTimestamp")
+            description = current_data_point.get("overallDescription")
+            if not current_timestamp or not is_within_market_hours(current_timestamp):
+                continue
 
-            # Input features for the model
+            # 1. Get all potential future points
+            potential_future_points = time_series[i + 1:]
+            
+            # 2. Filter them to include only points that occurred during market hours
+            valid_future_market_points = [
+                p for p in potential_future_points 
+                if p.get("intervalTimestamp") and is_within_market_hours(p["intervalTimestamp"])
+            ]
+            
+            # 3. Check if we have enough valid points to form a label
+            if len(valid_future_market_points) >= LABELING_WINDOW_POINTS:
+                # 4. If so, the labeling window is the next 39 valid points
+                labeling_window = valid_future_market_points[:LABELING_WINDOW_POINTS]
+            else:
+                # Not enough future market data to create a label.
+                continue
+
+            # --- Assemble the Training Example ---
             time_series_data = [dp.get("normalizedData", []) for dp in feature_window]
             masking_array = [dp.get("maskWhenTraining", True) for dp in feature_window]
             
             # If absolutely none of the datapoints for this time series occurred during market hours, don't bother training with it 
             if all(masking_array):
+                continue
+
+            # If we have already trained the model using this datapoint, don't bother training with it again
+            if current_data_point.get("hasBeenLabeled"):
+                print(f"  -> Skipping a data point that has already been previously labeled.")
                 continue
             
             if not all(isinstance(d, list) and len(d) == 11 for d in time_series_data):
@@ -155,7 +206,6 @@ def process_daily_data():
                 print("  -> Skipping a window due to missing current price.")
                 continue
 
-            # The label_data_point function is now correctly given only future data
             profit_perc, loss_perc = label_data_point(current_price, labeling_window)
 
             option_type_encoding = get_option_type_encoding(contract["optionType"])
@@ -168,23 +218,26 @@ def process_daily_data():
                 "predicted_profit_percentage": profit_perc,
                 "predicted_loss_percentage": loss_perc
             })
+            raw_options_data_entries_labeled.append(current_data_point['_id'])
 
+        if raw_options_data_entries_labeled:
+            options_db.flag_document_as_labeled(raw_options_data_entries_labeled)
     if not processed_data_rows:
         print("\nNo processable training data was generated.")
-        client.close()
+        options_db.close_connection()
         return
 
     df = pd.DataFrame(processed_data_rows)
-    
+    SAVE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     file_date = now_utc.strftime('%Y-%m-%d')
     file_name = f"{file_date}_options_training_data.parquet"
-    
-    df.to_parquet(file_name, index=False)
-    
-    print(f"\nSuccessfully created {len(df)} training examples.")
-    print(f"Data saved to {file_name}")
+    full_file_path = SAVE_DIRECTORY / file_name
+    df.to_parquet(full_file_path, index=False)
 
-    client.close()
+    print(f"\nSuccessfully created {len(df)} training examples.")
+    print(f"Data saved to {full_file_path}")
+
+    options_db.close_connection()
 
 
 if __name__ == "__main__":
