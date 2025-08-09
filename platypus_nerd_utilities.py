@@ -216,22 +216,30 @@ def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size
     x_train, y_train, x_val, y_val = load_and_preprocess_data(data_directory)
     model = build_lstm_model()
     
-    # --- Callbacks ---
-    # Callbacks are utilities that can be applied at different stages of the training process.
-    
-    # `ModelCheckpoint`: Saves the model after every epoch where the validation loss improves.
-    # This ensures that even if the training is interrupted, you will have the best version of the model saved.
+    # 1. Check if the validation set has any data.
+    num_validation_samples = x_val['time_series_input'].shape[0]
+
+    if num_validation_samples > 0:
+        # If we HAVE validation data, set the callbacks and fit() arguments normally.
+        print("Validation data found. Monitoring 'val_loss'.")
+        monitor_metric = 'val_loss'
+        validation_args = {'validation_data': (x_val, y_val)}
+    else:
+        # If we DO NOT have validation data, change the metric and remove the argument.
+        print("No validation data found. Monitoring training 'loss' instead.")
+        monitor_metric = 'loss'
+        validation_args = {} # This empty dictionary will pass nothing to model.fit
+
+    # 2. Configure the callbacks to use the correct metric.
     checkpoint = ModelCheckpoint(
         filepath=model_save_path,
         save_best_only=True,
-        monitor='val_loss',
+        monitor=monitor_metric, # Now uses our dynamic metric
         mode='min',
         verbose=1
     )
-    # `EarlyStopping`: Monitors the validation loss and stops the training if it hasn't improved
-    # for a set number of epochs (`patience`). This prevents overfitting and saves time.
     early_stopping = EarlyStopping(
-        monitor='val_loss',
+        monitor=monitor_metric, # Now uses our dynamic metric
         patience=10,
         mode='min',
         verbose=1,
@@ -239,14 +247,16 @@ def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size
     )
     
     print("\n--- Starting Model Training ---")
+    
+    # 3. Call model.fit, conditionally adding the validation_data argument.
     history = model.fit(
         x_train,
         y_train,
-        validation_data=(x_val, y_val),
         epochs=epochs,
         batch_size=batch_size,
         callbacks=[checkpoint, early_stopping],
-        verbose=1
+        verbose=1,
+        **validation_args # This cleanly unpacks the arguments
     )
     print("--- Model Training Finished ---")
     return history

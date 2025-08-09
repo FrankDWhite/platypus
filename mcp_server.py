@@ -7,13 +7,13 @@ import tensorflow as tf
 import threading
 
 # --- Import Project Utilities ---
-from platypus_nerd_utilities import train_model as train_nerd_model, load_trained_model as load_nerd_model
-from platypus_mba_utilities import train_mba_model, build_mba_model # We need build_mba_model to load it
+from platypus_nerd_utilities import train_model as train_nerd_model, load_trained_model
+from platypus_mba_utilities import train_mba_model
 from embedding_utils import get_ticker_encoding, get_option_type_encoding
 
 # --- Server & Model Configuration ---
 NERD_MODEL_PATH = "./models/platypus_nerd_v1.keras"
-MBA_MODEL_PATH = "./models/platypus_mba_v1.h5" # H5 format is also common
+MBA_MODEL_PATH = "./models/platypus_mba_v1.keras"
 TRAINING_DATA_DIR = "/home/bcm/training_data_single_example/"
 
 # --- Global Model Storage ---
@@ -52,11 +52,8 @@ def load_models():
     global platypus_nerd_model, platypus_mba_model
     print("--- 🧠 Loading models into memory... ---")
     try:
-        platypus_nerd_model = load_nerd_model(NERD_MODEL_PATH)
-        # Note: The MBA model needs to be built before its weights can be loaded if saved just as weights.
-        # If saved as a full model, this could be simpler. This approach is robust.
-        platypus_mba_model = build_mba_model()
-        platypus_mba_model.load_weights(MBA_MODEL_PATH)
+        platypus_nerd_model = load_trained_model(NERD_MODEL_PATH)
+        platypus_mba_model = load_trained_model(MBA_MODEL_PATH)
         print("--- ✅ Models loaded successfully. Server is ready. ---")
     except Exception as e:
         print(f"🔥🔥🔥 FATAL ERROR: Could not load models on startup. {e} 🔥🔥🔥")

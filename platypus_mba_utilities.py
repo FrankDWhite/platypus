@@ -108,7 +108,6 @@ def train_mba_model(
     # We need to reshape our data for the ranking loss function. It expects
     # a "list" of items, but since we are evaluating each item individually,
     # we can treat each one as a list of size 1.
-    mba_features = tf.expand_dims(mba_features, axis=1)
     true_relevance = tf.expand_dims(true_relevance, axis=1)
 
     mba_model.compile(optimizer='adam', loss=ranking_loss)
