@@ -2,7 +2,7 @@
 
 import polars as pl
 
-file_path = '/home/bcm/training_data/2025-07-19_options_training_data.parquet'
+file_path = './training_data/2025-07-24_options_training_data.parquet'
 df = pl.read_parquet(file_path)
 
 
@@ -20,7 +20,7 @@ print(f"The total number of examples in the file is: {df.height}")
 # Get your sample of 5 entries
 highest_quality_entries = df.filter(
     pl.col('masking_array').list.sum() == 0
-).head(5)
+).head(1)
 
 # --- Loop through the results and print each one vertically ---
 # .to_dicts() converts the DataFrame rows into a list of Python dictionaries
