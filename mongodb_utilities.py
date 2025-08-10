@@ -189,6 +189,51 @@ class OptionsRawDataStore:
         except pymongo.errors.PyMongoError as e:
             print(f"Error flagging documents as labeled: {e}")
             return 0
+        
+    def find_option_contract_time_series(
+        self,
+        symbol: str,
+        expiration_date: datetime,
+        strike_price: float,
+        option_type: str,
+        start_timestamp: datetime = None,
+        end_timestamp: datetime = None,
+        limit: int = 0,
+        sort_order: int = ASCENDING,
+        only_unlabeled: bool = False
+    ) -> list[dict]:
+        """
+        Retrieves the historical time series for a specific option contract.
+        """
+        if self.client is None or self.collection is None:
+            return []
+        
+        query = {
+            "underlyingSymbol": symbol,
+            "expirationDate": expiration_date,
+            "strikePrice": strike_price,
+            "optionType": option_type,
+        }
+        
+        if only_unlabeled:
+            query["hasBeenLabeled"] = {"$ne": True}
+            
+        if start_timestamp or end_timestamp:
+            query["intervalTimestamp"] = {}
+            if start_timestamp:
+                query["intervalTimestamp"]["$gte"] = start_timestamp
+            if end_timestamp:
+                query["intervalTimestamp"]["$lte"] = end_timestamp
+                
+        try:
+            cursor = self.collection.find(query).sort("intervalTimestamp", sort_order)
+            if limit > 0:
+                cursor = cursor.limit(limit)
+            return list(cursor)
+        except pymongo.errors.PyMongoError as e:
+            print(f"Error querying documents: {e}")
+            return []
+
 
         # --- New Function: Ingest OptionChainResponse ---
     def insert_option_chain_response(self, option_chain_response: OptionChainResponse, market_open):
@@ -298,6 +343,7 @@ class OptionsRawDataStore:
                             "gamma": option_data.gamma,
                             "theta": option_data.theta,
                             "vega": option_data.vega,
+                            "delta": option_data.delta,
                             "hoursToExpiration": hours_to_expiration,
                             "impliedVolatility": option_data.volatility, # Assuming 'volatility' field is implied volatility
                             "intrinsicValue": option_data.intrinsicValue,

@@ -105,15 +105,8 @@ def perform_inference(request: InferenceRequest):
     
     # Sort the results in descending order based on the MBA model's score. [cite: 37]
     ranked_results = sorted(results, key=lambda x: x['mba_ranking_score'], reverse=True)
-
-    # --- 6. Apply Post-Inference Filtering ---
-    # Example of the hard-wired logic mentioned in the spec. [cite: 13, 14]
-    final_recommendations = [
-        res for res in ranked_results 
-        if 'delta' in res['options_contract'] and 0.4 < res['options_contract']['delta'] < 0.8
-    ]
     
-    return {"ranked_recommendations": final_recommendations}
+    return {"ranked_recommendations": ranked_results}
 
 def trigger_training(model_type: str):
     """

@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 import pandas
 import pprint
+import random
 
 from embedding_utils import TICKER_VOCABULARY
 from models import OptionChainResponse
@@ -12,6 +13,7 @@ from mongodb_utilities import OptionsRawDataStore
 from normalization_stats import RunningStatsDB
 from normalization_utilities import normalize_option_data
 import numpy as np
+from trading_machine import prepare_and_run_inference
 
 def read_access_token():
     # MongoDB connection details
@@ -239,6 +241,8 @@ if __name__ == "__main__":
     
     market_open = trading_client.is_market_open(market_hours)
     print(f"Is the market open? {market_open}")
+    
+    all_inserted_ids = []
 
     # --- MAIN CHANGE: Loop through all target stocks ---
     for stock_symbol in TICKER_VOCABULARY:
@@ -261,6 +265,8 @@ if __name__ == "__main__":
         if not inserted_ids_from_chain:
             print(f"No documents were inserted for {stock_symbol}. Skipping.")
             continue
+
+        all_inserted_ids.extend(inserted_ids_from_chain)
             
         print(f"Successfully inserted {len(inserted_ids_from_chain)} documents for {stock_symbol}.")
         
@@ -294,6 +300,11 @@ if __name__ == "__main__":
             print(f"Finished normalization for {stock_symbol}.")
 
     print("\n--- All stocks processed. ---")
+    if all_inserted_ids:
+        print(f"Selecting 1 random document from the {len(all_inserted_ids)} processed to send for inference.")
+        random_id_to_test = random.choice(all_inserted_ids)
+        # The trading machine function expects a list of IDs, so we wrap our single ID in a list.
+        prepare_and_run_inference([random_id_to_test])
 
     options_db.close_connection()
     normalization_db.close_connection()

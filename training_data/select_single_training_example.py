@@ -5,7 +5,7 @@ from pathlib import Path
 
 # --- Configuration ---
 # Point this to one of your large, existing training data files.
-INPUT_PARQUET_FILE = Path("./2025-07-24_options_training_data.parquet")
+INPUT_PARQUET_FILE = Path("./2025-08-01_options_training_data.parquet")
 
 # Define where to save the new single-example file.
 # It's a good practice to put it in a separate directory for testing.
