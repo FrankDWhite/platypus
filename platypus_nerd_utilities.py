@@ -161,6 +161,11 @@ def load_and_preprocess_data(directory_path: str) -> tuple:
 
     print(f"Found {len(parquet_files)} Parquet files. Loading...")
     df = pl.read_parquet(parquet_files)
+
+    # Before we do anything else, we shuffle the entire DataFrame.
+    # This ensures that data from all times of the day is mixed together,
+    # preventing the model from developing a recency bias during training.
+    df = df.sample(fraction=1.0, shuffle=True)
     
     # --- Convert data to NumPy arrays ---
     # TensorFlow works with NumPy arrays, so we convert the columns from the DataFrame.
@@ -209,14 +214,37 @@ def load_and_preprocess_data(directory_path: str) -> tuple:
 
 def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size=64):
     """
-    Main training function to orchestrate the entire training process.
+    Main training function. It now supports fine-tuning.
+    If a model exists at `model_save_path`, it will load it and continue training.
+    Otherwise, it will build a new model from scratch.
     """
     print("--- 🚀 Starting Platypus Nerd train_model Workflow ---")
 
     x_train, y_train, x_val, y_val = load_and_preprocess_data(data_directory)
-    model = build_lstm_model()
     
-    # 1. Check if the validation set has any data.
+    # --- *** THE FINE-TUNING LOGIC IS HERE *** ---
+    model_path = Path(model_save_path)
+    if model_path.exists():
+        # If the model file already exists, load it to continue training.
+        print(f"Existing model found at {model_save_path}. Loading for fine-tuning.")
+        model = load_trained_model(model_save_path)
+        model.compile(
+            optimizer='adam',
+            loss={
+                'profit_output': 'mean_squared_error',
+                'loss_output': 'mean_squared_error'
+            },
+            metrics={
+                'profit_output': tf.keras.metrics.RootMeanSquaredError(),
+                'loss_output': tf.keras.metrics.RootMeanSquaredError()
+            }
+        )
+    else:
+        # If no model exists, build a new one from scratch.
+        print("No existing model found. Building a new model from scratch.")
+        model = build_lstm_model()
+    # --- *** END OF CHANGES *** ---
+
     num_validation_samples = x_val['time_series_input'].shape[0]
 
     if num_validation_samples > 0:
@@ -234,12 +262,12 @@ def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size
     checkpoint = ModelCheckpoint(
         filepath=model_save_path,
         save_best_only=True,
-        monitor=monitor_metric, # Now uses our dynamic metric
+        monitor=monitor_metric,
         mode='min',
         verbose=1
     )
     early_stopping = EarlyStopping(
-        monitor=monitor_metric, # Now uses our dynamic metric
+        monitor=monitor_metric,
         patience=10,
         mode='min',
         verbose=1,
@@ -256,7 +284,7 @@ def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size
         batch_size=batch_size,
         callbacks=[checkpoint, early_stopping],
         verbose=1,
-        **validation_args # This cleanly unpacks the arguments
+        **validation_args
     )
     print("--- Model Training Finished ---")
     return history

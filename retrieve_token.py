@@ -304,7 +304,7 @@ if __name__ == "__main__":
         print(f"Selecting 1 random document from the {len(all_inserted_ids)} processed to send for inference.")
         random_id_to_test = random.choice(all_inserted_ids)
         # The trading machine function expects a list of IDs, so we wrap our single ID in a list.
-        prepare_and_run_inference([random_id_to_test])
+        # prepare_and_run_inference(all_inserted_ids)
 
     options_db.close_connection()
     normalization_db.close_connection()

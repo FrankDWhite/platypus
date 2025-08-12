@@ -97,7 +97,13 @@ def train_mba_model(
     true_relevance = np.array(df['predicted_profit_percentage'].to_list(), dtype=np.float32)
 
     # --- Step 4: Build and Train the MBA model ---
-    mba_model = build_mba_model()
+    model_path = Path(mba_model_save_path)
+    if model_path.exists():
+        print(f"Existing MBA model found at {mba_model_save_path}. Loading for fine-tuning.")
+        mba_model = tf.keras.models.load_model(mba_model_save_path, compile=False)
+    else:
+        print("No existing MBA model found. Building a new model from scratch.")
+        mba_model = build_mba_model()
     
     # --- CRITICAL: COMPILE WITH RANKING LOSS ---
     # This is the key to making this a ranking model. [cite: 42]
