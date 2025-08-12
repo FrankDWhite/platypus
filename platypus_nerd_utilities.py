@@ -261,7 +261,7 @@ def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size
     # 2. Configure the callbacks to use the correct metric.
     checkpoint = ModelCheckpoint(
         filepath=model_save_path,
-        save_best_only=True,
+        save_best_only=False,
         monitor=monitor_metric,
         mode='min',
         verbose=1

@@ -121,7 +121,7 @@ def train_mba_model(
     print("Starting MBA model training...")
     
     # Set up callbacks
-    checkpoint = ModelCheckpoint(filepath=mba_model_save_path, save_best_only=True, monitor='loss', mode='min')
+    checkpoint = ModelCheckpoint(filepath=mba_model_save_path, save_best_only=False, monitor='loss', mode='min')
     early_stopping = EarlyStopping(monitor='loss', patience=5, mode='min', restore_best_weights=True)
 
     mba_model.fit(
