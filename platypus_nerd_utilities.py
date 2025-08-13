@@ -214,58 +214,35 @@ def load_and_preprocess_data(directory_path: str) -> tuple:
 
 def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size=64):
     """
-    Main training function. It now supports fine-tuning.
-    If a model exists at `model_save_path`, it will load it and continue training.
-    Otherwise, it will build a new model from scratch.
+    Main training function. It now returns the final, trained model object.
     """
     print("--- 🚀 Starting Platypus Nerd train_model Workflow ---")
 
     x_train, y_train, x_val, y_val = load_and_preprocess_data(data_directory)
     
-    # --- *** THE FINE-TUNING LOGIC IS HERE *** ---
     model_path = Path(model_save_path)
     if model_path.exists():
-        # If the model file already exists, load it to continue training.
         print(f"Existing model found at {model_save_path}. Loading for fine-tuning.")
         model = load_trained_model(model_save_path)
         model.compile(
             optimizer='adam',
-            loss={
-                'profit_output': 'mean_squared_error',
-                'loss_output': 'mean_squared_error'
-            },
-            metrics={
-                'profit_output': tf.keras.metrics.RootMeanSquaredError(),
-                'loss_output': tf.keras.metrics.RootMeanSquaredError()
-            }
+            loss={'profit_output': 'mean_squared_error', 'loss_output': 'mean_squared_error'},
+            metrics={'profit_output': tf.keras.metrics.RootMeanSquaredError(), 'loss_output': tf.keras.metrics.RootMeanSquaredError()}
         )
     else:
-        # If no model exists, build a new one from scratch.
         print("No existing model found. Building a new model from scratch.")
         model = build_lstm_model()
-    # --- *** END OF CHANGES *** ---
 
     num_validation_samples = x_val['time_series_input'].shape[0]
 
     if num_validation_samples > 0:
-        # If we HAVE validation data, set the callbacks and fit() arguments normally.
-        print("Validation data found. Monitoring 'val_loss'.")
         monitor_metric = 'val_loss'
         validation_args = {'validation_data': (x_val, y_val)}
     else:
-        # If we DO NOT have validation data, change the metric and remove the argument.
-        print("No validation data found. Monitoring training 'loss' instead.")
         monitor_metric = 'loss'
-        validation_args = {} # This empty dictionary will pass nothing to model.fit
+        validation_args = {}
 
-    # 2. Configure the callbacks to use the correct metric.
-    checkpoint = ModelCheckpoint(
-        filepath=model_save_path,
-        save_best_only=False,
-        monitor=monitor_metric,
-        mode='min',
-        verbose=1
-    )
+    # We only need EarlyStopping. It will find the best epoch and restore the model to that state.
     early_stopping = EarlyStopping(
         monitor=monitor_metric,
         patience=10,
@@ -276,18 +253,19 @@ def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size
     
     print("\n--- Starting Model Training ---")
     
-    # 3. Call model.fit, conditionally adding the validation_data argument.
-    history = model.fit(
+    model.fit(
         x_train,
         y_train,
         epochs=epochs,
         batch_size=batch_size,
-        callbacks=[checkpoint, early_stopping],
+        callbacks=[early_stopping], # Only EarlyStopping is needed now
         verbose=1,
         **validation_args
     )
     print("--- Model Training Finished ---")
-    return history
+    
+    # Return the final model object, which holds the best weights from this session.
+    return model
 
 def load_trained_model(model_path: str) -> tf.keras.Model:
     """

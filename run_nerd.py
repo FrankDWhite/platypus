@@ -37,12 +37,20 @@ def main():
     # We call the main training function from our utility file.
     # This will handle loading the data, building the model, and running the training loop.
     # It will automatically save the best-performing model to `MODEL_SAVE_PATH`.
-    train_model(
+    trained_nerd_model = train_model(
         data_directory=TRAINING_DATA_DIRECTORY,
         model_save_path=MODEL_SAVE_PATH,
         epochs=5,  # For a single example, we only need a few epochs to see it run.
         batch_size=1
     )
+
+        # --- Authoritative Save ---
+    # We now explicitly save the final model object after training is complete.
+    # This guarantees that the version with the restored best weights is saved.
+    print(f"Saving final, fine-tuned model to {MODEL_SAVE_PATH}...")
+    trained_nerd_model.save(MODEL_SAVE_PATH)
+    print("Model saved successfully.")
+
 
     # --- 2. Load the Trained Model ---
     # In a real application, you would train the model once and then load the saved file

@@ -61,19 +61,15 @@ def train_mba_model(
     """
     print("---  MBA Model Training Workflow ---")
     
-    # --- Step 1: Load Labeled Data ---
-    # This is the same data used to train the nerd model.
     path = Path(data_directory)
     parquet_files = list(path.glob('*_options_training_data.parquet'))
     if not parquet_files:
         raise FileNotFoundError(f"No training files found in {data_directory}")
     df = pl.read_parquet(parquet_files)
 
-    # --- Step 2: Generate Features with the Nerd Model ---
     print("Loading 'nerd' model to generate features for MBA model...")
     nerd_model = tf.keras.models.load_model(nerd_model_path)
     
-    # Prepare inputs for the nerd model
     time_series_data = np.array(df['time_series_data'].to_list(), dtype=np.float32)
     ticker_data = np.array(df['ticker_embedding'].to_list(), dtype=np.int32).reshape(-1, 1)
     option_type_data = np.array(df['option_type_embedding'].to_list(), dtype=np.int32).reshape(-1, 1)
@@ -83,20 +79,10 @@ def train_mba_model(
         'ticker_input': ticker_data,
         'option_type_input': option_type_data
     }
-
-    # Use the nerd model to predict profit and loss. These predictions will be the
-    # input features for the MBA model. [cite: 16]
     predicted_profits, predicted_losses = nerd_model.predict(nerd_inputs)
-    
-    # This is our feature set (X) for the MBA model.
     mba_features = np.concatenate([predicted_profits, predicted_losses], axis=1)
-
-    # --- Step 3: Define True Relevance Labels ---
-    # For a ranking task, the label is the "true" score we want the model to learn to predict.
-    # In our case, the actual profit percentage is a perfect relevance score.
     true_relevance = np.array(df['predicted_profit_percentage'].to_list(), dtype=np.float32)
 
-    # --- Step 4: Build and Train the MBA model ---
     model_path = Path(mba_model_save_path)
     if model_path.exists():
         print(f"Existing MBA model found at {mba_model_save_path}. Loading for fine-tuning.")
@@ -104,32 +90,26 @@ def train_mba_model(
     else:
         print("No existing MBA model found. Building a new model from scratch.")
         mba_model = build_mba_model()
-    
-    # --- CRITICAL: COMPILE WITH RANKING LOSS ---
-    # This is the key to making this a ranking model. [cite: 42]
-    # We use ApproxNDCGLoss, which directly optimizes the model to push items with the
-    # highest true relevance scores to the top of the list. This perfectly matches our goal. [cite: 44, 45, 46]
-    ranking_loss = tfr.keras.losses.ApproxNDCGLoss()
-    
-    # We need to reshape our data for the ranking loss function. It expects
-    # a "list" of items, but since we are evaluating each item individually,
-    # we can treat each one as a list of size 1.
-    true_relevance = tf.expand_dims(true_relevance, axis=1)
 
+    ranking_loss = tfr.keras.losses.ApproxNDCGLoss()
     mba_model.compile(optimizer='adam', loss=ranking_loss)
     
     print("Starting MBA model training...")
     
-    # Set up callbacks
-    checkpoint = ModelCheckpoint(filepath=mba_model_save_path, save_best_only=False, monitor='loss', mode='min')
+    true_relevance_reshaped = tf.expand_dims(true_relevance, axis=1)
+    
+    # We only need EarlyStopping to find and restore the best weights.
     early_stopping = EarlyStopping(monitor='loss', patience=5, mode='min', restore_best_weights=True)
 
     mba_model.fit(
         mba_features,
-        true_relevance,
+        true_relevance_reshaped,
         epochs=epochs,
         batch_size=batch_size,
-        callbacks=[checkpoint, early_stopping]
+        callbacks=[early_stopping], # Removed ModelCheckpoint
+        verbose=1
     )
     
-    print(f"--- MBA Model training finished. Best model saved to {mba_model_save_path} ---")
+    print(f"--- MBA Model training finished ---")
+    # Return the final model object.
+    return mba_model
