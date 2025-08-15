@@ -301,10 +301,16 @@ if __name__ == "__main__":
 
     print("\n--- All stocks processed. ---")
     if all_inserted_ids:
-        print(f"Selecting 1 random document from the {len(all_inserted_ids)} processed to send for inference.")
-        random_id_to_test = random.choice(all_inserted_ids)
-        # The trading machine function expects a list of IDs, so we wrap our single ID in a list.
-        # prepare_and_run_inference(all_inserted_ids)
+        # Check if the list of new IDs is larger than our desired sample size.
+        if len(all_inserted_ids) > 100:
+            print(f"Randomly selecting 100 documents from the {len(all_inserted_ids)} processed to send for inference.")
+            ids_to_process = random.sample(all_inserted_ids, 100)
+        else:
+            print(f"Selecting all {len(all_inserted_ids)} documents to send for inference.")
+            ids_to_process = all_inserted_ids
+        
+        # Call the trading machine with the final list of IDs.
+        prepare_and_run_inference(all_inserted_ids)
 
     options_db.close_connection()
     normalization_db.close_connection()
