@@ -81,7 +81,7 @@ def create_and_save_test_vector_batch():
             "delta": current_doc.get("delta"),
             "strikePrice": current_doc.get("strikePrice"),
             "hoursToExpiration": current_doc.get("hoursToExpiration"),
-            "document_id": str(current_doc.get("_id"))
+            "current_price": current_doc.get("optionPrice")
         }
 
         vector = OptionVector(

@@ -80,7 +80,7 @@ def prepare_and_run_inference(inserted_document_ids: List[str]):
             "delta": doc.get("delta"),
             "strikePrice": doc.get("strikePrice"),
             "hoursToExpiration": doc.get("hoursToExpiration"),
-            "document_id": str(doc.get("_id"))
+            "current_price": doc.get("optionPrice")
         }
 
         vector = OptionVector(
