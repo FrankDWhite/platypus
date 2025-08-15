@@ -5,7 +5,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import polars as pl
 from pathlib import Path
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 # --- Import project-specific utilities ---
 # We need the vocabulary sizes to correctly define our Embedding layers.
@@ -150,17 +150,13 @@ def build_lstm_model(embedding_dim_ticker=4, embedding_dim_option_type=2) -> tf.
     print("--------------------------")
     return model
 
-def load_and_preprocess_data(directory_path: str) -> tuple:
+def load_and_preprocess_data(file_path: Union[str, Path]) -> tuple:
     """
-    Loads all Parquet training data, prepares it for the model, and splits it.
+    Loads a SINGLE Parquet training file, prepares it for the model, and splits it.
     """
-    path = Path(directory_path)
-    parquet_files = list(path.glob('*_options_training_data.parquet'))
-    if not parquet_files:
-        raise FileNotFoundError(f"No Parquet files found in directory: {directory_path}")
-
-    print(f"Found {len(parquet_files)} Parquet files. Loading...")
-    df = pl.read_parquet(parquet_files)
+    print(f"Loading and preprocessing data from: {file_path}")
+    # This now only loads ONE file, keeping memory usage low.
+    df = pl.read_parquet(file_path)
 
     # Before we do anything else, we shuffle the entire DataFrame.
     # This ensures that data from all times of the day is mixed together,
@@ -214,57 +210,60 @@ def load_and_preprocess_data(directory_path: str) -> tuple:
 
 def train_model(data_directory: str, model_save_path: str, epochs=50, batch_size=64):
     """
-    Main training function. It now returns the final, trained model object.
+    Main training function. It now safely loops through all Parquet files,
+    training the model on each one sequentially to keep memory usage low.
     """
     print("--- 🚀 Starting Platypus Nerd train_model Workflow ---")
 
-    x_train, y_train, x_val, y_val = load_and_preprocess_data(data_directory)
-    
     model_path = Path(model_save_path)
     if model_path.exists():
         print(f"Existing model found at {model_save_path}. Loading for fine-tuning.")
         model = load_trained_model(model_save_path)
+    else:
+        print("No existing model found. Building a new model from scratch.")
+        model = build_lstm_model()
+
+    # --- *** THE FIX IS HERE: FILE-BY-FILE TRAINING LOOP *** ---
+    path = Path(data_directory)
+    parquet_files = sorted(list(path.glob('*_options_training_data.parquet')))
+    
+    if not parquet_files:
+        raise FileNotFoundError(f"No training files found to process in {data_directory}")
+
+    # Loop through each Parquet file and train on it.
+    for i, file_path in enumerate(parquet_files):
+        print(f"\n--- Training on file {i+1}/{len(parquet_files)}: {file_path.name} ---")
+        
+        # 1. Load data for the current file ONLY.
+        x_train, y_train, x_val, y_val = load_and_preprocess_data(file_path)
+
+        # 2. Re-compile the model to reset the optimizer for this fine-tuning session.
         model.compile(
             optimizer='adam',
             loss={'profit_output': 'mean_squared_error', 'loss_output': 'mean_squared_error'},
             metrics={'profit_output': tf.keras.metrics.RootMeanSquaredError(), 'loss_output': tf.keras.metrics.RootMeanSquaredError()}
         )
-    else:
-        print("No existing model found. Building a new model from scratch.")
-        model = build_lstm_model()
 
-    num_validation_samples = x_val['time_series_input'].shape[0]
+        num_validation_samples = x_val['time_series_input'].shape[0]
+        if num_validation_samples > 0:
+            monitor_metric = 'val_loss'
+            validation_args = {'validation_data': (x_val, y_val)}
+        else:
+            monitor_metric = 'loss'
+            validation_args = {}
 
-    if num_validation_samples > 0:
-        monitor_metric = 'val_loss'
-        validation_args = {'validation_data': (x_val, y_val)}
-    else:
-        monitor_metric = 'loss'
-        validation_args = {}
+        early_stopping = EarlyStopping(
+            monitor=monitor_metric, patience=10, mode='min', verbose=1, restore_best_weights=True
+        )
+        
+        # 3. Fit the model on the current file's data.
+        model.fit(
+            x_train, y_train, epochs=epochs, batch_size=batch_size,
+            callbacks=[early_stopping], verbose=1, **validation_args
+        )
+        # At the end of this loop, the memory from x_train, y_train, etc. is released.
 
-    # We only need EarlyStopping. It will find the best epoch and restore the model to that state.
-    early_stopping = EarlyStopping(
-        monitor=monitor_metric,
-        patience=10,
-        mode='min',
-        verbose=1,
-        restore_best_weights=True
-    )
-    
-    print("\n--- Starting Model Training ---")
-    
-    model.fit(
-        x_train,
-        y_train,
-        epochs=epochs,
-        batch_size=batch_size,
-        callbacks=[early_stopping], # Only EarlyStopping is needed now
-        verbose=1,
-        **validation_args
-    )
     print("--- Model Training Finished ---")
-    
-    # Return the final model object, which holds the best weights from this session.
     return model
 
 def load_trained_model(model_path: str) -> tf.keras.Model:
@@ -325,3 +324,37 @@ def perform_batch_inference(
         results.append((profit[0], loss[0]))
         
     return results
+
+def _train_on_single_file(model: tf.keras.Model, file_path: Path, epochs: int, batch_size: int):
+    """
+    A helper function that encapsulates the logic for training on a single Parquet file.
+    This ensures that data is loaded and discarded from memory one file at a time.
+    """
+    # 1. Load and preprocess data for this file only.
+    x_train, y_train, x_val, y_val = load_and_preprocess_data(file_path)
+
+    # 2. Re-compile the model to reset the optimizer for this fine-tuning session.
+    model.compile(
+        optimizer='adam',
+        loss={'profit_output': 'mean_squared_error', 'loss_output': 'mean_squared_error'},
+        metrics={'profit_output': tf.keras.metrics.RootMeanSquaredError(), 'loss_output': tf.keras.metrics.RootMeanSquaredError()}
+    )
+
+    num_validation_samples = x_val['time_series_input'].shape[0]
+    if num_validation_samples > 0:
+        monitor_metric = 'val_loss'
+        validation_args = {'validation_data': (x_val, y_val)}
+    else:
+        monitor_metric = 'loss'
+        validation_args = {}
+
+    early_stopping = EarlyStopping(
+        monitor=monitor_metric, patience=10, mode='min', verbose=1, restore_best_weights=True
+    )
+    
+    # 3. Fit the model on this file's data.
+    model.fit(
+        x_train, y_train, epochs=epochs, batch_size=batch_size,
+        callbacks=[early_stopping], verbose=1, **validation_args
+    )
+    # When this function returns, x_train, y_train, etc., are cleared from memory.

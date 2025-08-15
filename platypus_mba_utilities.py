@@ -42,6 +42,46 @@ def build_mba_model() -> tf.keras.Model:
 
     return model
 
+def _train_mba_on_single_file(
+    mba_model: tf.keras.Model, 
+    nerd_model: tf.keras.Model, 
+    file_path: Path, 
+    epochs: int, 
+    batch_size: int
+):
+    """
+    A helper function that encapsulates the logic for training the MBA model on a single file.
+    This ensures data is loaded and discarded from memory one file at a time.
+    """
+    # 1. Load data and generate features for this file only.
+    df = pl.read_parquet(file_path)
+    time_series_data = np.array(df['time_series_data'].to_list(), dtype=np.float32)
+    ticker_data = np.array(df['ticker_embedding'].to_list(), dtype=np.int32).reshape(-1, 1)
+    option_type_data = np.array(df['option_type_embedding'].to_list(), dtype=np.int32).reshape(-1, 1)
+    nerd_inputs = {'time_series_input': time_series_data, 'ticker_input': ticker_data, 'option_type_input': option_type_data}
+    predicted_profits, predicted_losses = nerd_model.predict(nerd_inputs)
+    
+    mba_features = np.concatenate([predicted_profits, predicted_losses], axis=1)
+    true_relevance = np.array(df['predicted_profit_percentage'].to_list(), dtype=np.float32)
+
+    # 2. Re-compile the model to reset the optimizer.
+    ranking_loss = tfr.keras.losses.ApproxNDCGLoss()
+    mba_model.compile(optimizer='adam', loss=ranking_loss)
+    
+    true_relevance_reshaped = tf.expand_dims(true_relevance, axis=1)
+    
+    # 3. Fit the model on this file's data.
+    early_stopping = EarlyStopping(monitor='loss', patience=5, mode='min', restore_best_weights=True)
+    mba_model.fit(
+        mba_features,
+        true_relevance_reshaped,
+        epochs=epochs,
+        batch_size=batch_size,
+        callbacks=[early_stopping],
+        verbose=1
+    )
+    # When this function returns, the large data arrays are cleared from memory.
+
 def train_mba_model(
     data_directory: str, 
     nerd_model_path: str, 
@@ -50,39 +90,10 @@ def train_mba_model(
     batch_size=32
 ):
     """
-    Main training function for the Platypus MBA ranking model.
-
-    This function simulates the full data pipeline for training:
-    1. Loads the labeled data from the Parquet files.
-    2. Uses the "nerd" model to generate predictions for that data.
-    3. Uses the "nerd" predictions as input features for the MBA model.
-    4. Defines the "true" relevance score for each option (e.g., the actual profit).
-    5. Trains the MBA model using a specialized ranking loss function.
+    Main training function for the MBA model, now training safely file-by-file.
     """
     print("---  MBA Model Training Workflow ---")
     
-    path = Path(data_directory)
-    parquet_files = list(path.glob('*_options_training_data.parquet'))
-    if not parquet_files:
-        raise FileNotFoundError(f"No training files found in {data_directory}")
-    df = pl.read_parquet(parquet_files)
-
-    print("Loading 'nerd' model to generate features for MBA model...")
-    nerd_model = tf.keras.models.load_model(nerd_model_path)
-    
-    time_series_data = np.array(df['time_series_data'].to_list(), dtype=np.float32)
-    ticker_data = np.array(df['ticker_embedding'].to_list(), dtype=np.int32).reshape(-1, 1)
-    option_type_data = np.array(df['option_type_embedding'].to_list(), dtype=np.int32).reshape(-1, 1)
-
-    nerd_inputs = {
-        'time_series_input': time_series_data,
-        'ticker_input': ticker_data,
-        'option_type_input': option_type_data
-    }
-    predicted_profits, predicted_losses = nerd_model.predict(nerd_inputs)
-    mba_features = np.concatenate([predicted_profits, predicted_losses], axis=1)
-    true_relevance = np.array(df['predicted_profit_percentage'].to_list(), dtype=np.float32)
-
     model_path = Path(mba_model_save_path)
     if model_path.exists():
         print(f"Existing MBA model found at {mba_model_save_path}. Loading for fine-tuning.")
@@ -91,25 +102,19 @@ def train_mba_model(
         print("No existing MBA model found. Building a new model from scratch.")
         mba_model = build_mba_model()
 
-    ranking_loss = tfr.keras.losses.ApproxNDCGLoss()
-    mba_model.compile(optimizer='adam', loss=ranking_loss)
-    
-    print("Starting MBA model training...")
-    
-    true_relevance_reshaped = tf.expand_dims(true_relevance, axis=1)
-    
-    # We only need EarlyStopping to find and restore the best weights.
-    early_stopping = EarlyStopping(monitor='loss', patience=5, mode='min', restore_best_weights=True)
+    print("Loading 'nerd' model to generate features for MBA model...")
+    nerd_model = tf.keras.models.load_model(nerd_model_path)
 
-    mba_model.fit(
-        mba_features,
-        true_relevance_reshaped,
-        epochs=epochs,
-        batch_size=batch_size,
-        callbacks=[early_stopping], # Removed ModelCheckpoint
-        verbose=1
-    )
+    path = Path(data_directory)
+    parquet_files = sorted(list(path.glob('*_options_training_data.parquet')))
+    
+    if not parquet_files:
+        raise FileNotFoundError(f"No training files found in {data_directory}")
+
+    # --- *** THE FIX IS HERE: CLEANER, MEMORY-SAFE LOOP *** ---
+    for i, file_path in enumerate(parquet_files):
+        print(f"\n--- Training MBA on file {i+1}/{len(parquet_files)}: {file_path.name} ---")
+        _train_mba_on_single_file(mba_model, nerd_model, file_path, epochs, batch_size)
     
     print(f"--- MBA Model training finished ---")
-    # Return the final model object.
     return mba_model
