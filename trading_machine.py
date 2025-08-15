@@ -128,7 +128,7 @@ def trigger_daily_retrain(current_day_data_path: str):
         # --- Step 1: Trigger the entire workflow with one "fire and forget" call ---
         print("\n1. Triggering full Platypus fine-tuning and restart workflow...")
         response = requests.post(
-            f"{MCP_SERVER_URL}/v1/trigger-full-retraining-workflow",
+            f"http://127.0.0.1:8000/v1/trigger-full-retraining-workflow",
             json={"data_directory": current_day_data_path}
             # No timeout is needed as the server responds instantly.
         )
