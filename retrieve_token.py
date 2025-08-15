@@ -13,7 +13,7 @@ from mongodb_utilities import OptionsRawDataStore
 from normalization_stats import RunningStatsDB
 from normalization_utilities import normalize_option_data
 import numpy as np
-from trading_machine import prepare_and_run_inference
+from trading_machine import prepare_and_run_inference, update_profit_loss_on_open_trades
 
 def read_access_token():
     # MongoDB connection details
@@ -311,6 +311,8 @@ if __name__ == "__main__":
         
         # Call the trading machine with the final list of IDs.
         prepare_and_run_inference(all_inserted_ids)
+
+    update_profit_loss_on_open_trades()
 
     options_db.close_connection()
     normalization_db.close_connection()

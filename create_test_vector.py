@@ -31,7 +31,7 @@ def create_and_save_test_vector_batch():
 
     # --- Step 1: Find a list of suitable candidate data points ---
     print("Searching for high-quality, unmasked data points in the database...")
-    search_start_time = datetime.now(timezone.utc) - timedelta(hours=24)
+    search_start_time = datetime.now(timezone.utc) - timedelta(hours=48)
     query = {
         "intervalTimestamp": {"$gte": search_start_time},
         "maskWhenTraining": False,
@@ -39,7 +39,7 @@ def create_and_save_test_vector_batch():
     }
     
     # Fetch a larger number of candidates to increase our chances of building enough valid windows.
-    candidate_docs = list(db.collection.find(query, sort=[("intervalTimestamp", DESCENDING)], limit=50))
+    candidate_docs = list(db.collection.find(query, sort=[("intervalTimestamp", ASCENDING)], limit=500))
 
     if not candidate_docs:
         print("Error: No suitable unmasked data points found from the last 24 hours.")
@@ -77,11 +77,13 @@ def create_and_save_test_vector_batch():
              continue
 
         raw_features = {
-            "description": current_doc.get("overallDescription"),
             "delta": current_doc.get("delta"),
             "strikePrice": current_doc.get("strikePrice"),
             "hoursToExpiration": current_doc.get("hoursToExpiration"),
-            "current_price": current_doc.get("optionPrice")
+            "current_price": current_doc.get("optionPrice"),
+            "underlyingSymbol": current_doc.get("underlyingSymbol"),
+            # "expirationDate": str(current_doc.get("expirationDate")),
+            "optionType": current_doc.get("optionType")
         }
 
         vector = OptionVector(
