@@ -82,12 +82,16 @@ def build_lstm_model(embedding_dim_ticker=4, embedding_dim_option_type=2) -> tf.
     # WHY MASKING IS IMPORTANT: Our data has gaps (pre-market, after-hours). The `masking_array`
     # tells us which time steps are just padding. The `Masking` layer ensures that the LSTM
     # completely ignores these time steps, preventing the model from learning from "fake" zeroed-out data.
-    # We will use this masking layer later when we prepare the data. For now, we build the model assuming masking will be handled.
+
+    # The Masking layer is now active. It will inspect the input `time_series_input`.
+    # If any time step (a vector of 11 features) consists entirely of zeros,
+    # it will be flagged and completely ignored by the subsequent LSTM layers.
+    masked_input = Masking(mask_value=0.0)(time_series_input)
     
     # The LSTM processes the 40 time steps one by one, updating its internal "memory" (hidden state) at each step.
     # `return_sequences=True` makes the first LSTM layer output its hidden state at *every* time step.
     # This is useful for stacking LSTM layers, as the next layer needs a full sequence as input.
-    lstm_out_1 = LSTM(64, return_sequences=True, name='lstm_layer_1')(time_series_input)
+    lstm_out_1 = LSTM(64, return_sequences=True, name='lstm_layer_1')(masked_input)
 
     # The second LSTM layer takes the sequence from the first one. By default (`return_sequences=False`),
     # it only outputs its final hidden state. This single vector represents the model's "summary"

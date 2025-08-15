@@ -62,7 +62,16 @@ def _train_mba_on_single_file(
     predicted_profits, predicted_losses = nerd_model.predict(nerd_inputs)
     
     mba_features = np.concatenate([predicted_profits, predicted_losses], axis=1)
-    true_relevance = np.array(df['predicted_profit_percentage'].to_list(), dtype=np.float32)
+
+    # We now create a "desirability score" from the ground truth labels.
+    # This teaches the MBA model to prioritize good risk/reward ratios.
+    actual_profits = np.array(df['predicted_profit_percentage'].to_list(), dtype=np.float32)
+    actual_losses = np.array(df['predicted_loss_percentage'].to_list(), dtype=np.float32)
+
+    # Calculate the "desirability score" as a direct risk/reward ratio.
+    # The higher the score, the more desirable the historical trade was.
+    # We add a small epsilon (1e-6) to the numerator to prevent division by zero.
+    true_relevance = actual_profits / (np.abs(actual_losses) + 1e-6)
 
     # 2. Re-compile the model to reset the optimizer.
     ranking_loss = tfr.keras.losses.ApproxNDCGLoss()
