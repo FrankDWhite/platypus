@@ -14,7 +14,9 @@ from embedding_utils import get_ticker_encoding, get_option_type_encoding
 # --- Server & Model Configuration ---
 NERD_MODEL_PATH = "./models/platypus_nerd_v1.keras"
 MBA_MODEL_PATH = "./models/platypus_mba_v1.keras"
-TRAINING_DATA_DIR = "/home/bcm/training_data_single_example/"
+NERD_MODEL_SAVE_PATH = "./models/via_mcp/platypus_nerd_v1.keras"
+MBA_MODEL_SAVE_PATH = "./models/via_mcp/platypus_mba_v1.keras"
+TRAINING_DATA_DIR = "./training_data/training_data_single_example/"
 
 # --- Global Model Storage ---
 # We will store the loaded models in global variables.
@@ -114,11 +116,13 @@ def trigger_training(model_type: str):
     """
     if model_type == "nerd":
         print("--- Triggering 'nerd' model training in the background. ---")
-        train_nerd_model(data_directory=TRAINING_DATA_DIR, model_save_path=NERD_MODEL_PATH)
+        trained_nerd = train_nerd_model(data_directory=TRAINING_DATA_DIR, model_save_path=NERD_MODEL_PATH)
+        trained_nerd.save(NERD_MODEL_SAVE_PATH)
         print("--- 'Nerd' model training finished. Overwriting complete. Please restart the server to load the new model. ---")
     elif model_type == "mba":
         print("--- Triggering 'mba' model training in the background. ---")
-        train_mba_model(data_directory=TRAINING_DATA_DIR, nerd_model_path=NERD_MODEL_PATH, mba_model_save_path=MBA_MODEL_PATH)
+        trained_mba = train_mba_model(data_directory=TRAINING_DATA_DIR, nerd_model_path=NERD_MODEL_PATH, mba_model_save_path=MBA_MODEL_PATH)
+        trained_mba.save(MBA_MODEL_SAVE_PATH)
         print("--- 'MBA' model training finished. Overwriting complete. Please restart the server to load the new model. ---")
 
 
