@@ -1,6 +1,7 @@
 #!/usr/bin/python3.10
 
 from datetime import timedelta
+import time
 import requests
 import pprint
 from typing import List, Dict, Any
@@ -114,3 +115,28 @@ def prepare_and_run_inference(inserted_document_ids: List[str]):
         print(f"Please ensure the mcp_server.py is running. Details: {e}")
     
     print("--- Trading Machine Finished ---")
+
+
+def trigger_daily_retrain(current_day_data_path: str):
+    """
+    Orchestrates the end-to-end daily training and server restart workflow
+    by making a single, non-blocking API call.
+    """
+    print("\n--- 🚀 Starting Automated MCP Training Workflow ---")
+    
+    try:
+        # --- Step 1: Trigger the entire workflow with one "fire and forget" call ---
+        print("\n1. Triggering full Platypus fine-tuning and restart workflow...")
+        response = requests.post(
+            f"{MCP_SERVER_URL}/v1/trigger-full-retraining-workflow",
+            json={"data_directory": current_day_data_path}
+            # No timeout is needed as the server responds instantly.
+        )
+        response.raise_for_status()
+        print(f"  -> Server response: {response.json()['message']}")
+        print("\n--- ✅ MCP Workflow Triggered Successfully ---")
+        print("The server will now train both models and restart in the background.")
+
+    except requests.exceptions.RequestException as e:
+        print(f"\n--- ❌ ERROR: Could not connect to the MCP server to trigger workflow. ---")
+        print(f"Please ensure the mcp_server.py is running. Details: {e}")

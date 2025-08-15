@@ -1,10 +1,12 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import numpy as np
 import tensorflow as tf
 import threading
+import os
+import time
 
 # --- Import Project Utilities ---
 from platypus_nerd_utilities import train_model as train_nerd_model, load_trained_model
@@ -14,8 +16,6 @@ from embedding_utils import get_ticker_encoding, get_option_type_encoding
 # --- Server & Model Configuration ---
 NERD_MODEL_PATH = "./models/platypus_nerd_v1.keras"
 MBA_MODEL_PATH = "./models/platypus_mba_v1.keras"
-NERD_MODEL_SAVE_PATH = "./models/via_mcp/platypus_nerd_v1.keras"
-MBA_MODEL_SAVE_PATH = "./models/via_mcp/platypus_mba_v1.keras"
 TRAINING_DATA_DIR = "./training_data/training_data_single_example/"
 
 # --- Global Model Storage ---
@@ -43,6 +43,9 @@ class OptionVector(BaseModel):
 class InferenceRequest(BaseModel):
     # The request will contain a batch of ~120 option vectors. [cite: 11]
     vectors: List[OptionVector]
+
+class TrainingRequest(BaseModel):
+    data_directory: str
 
 # --- Server Startup Event ---
 @app.on_event("startup")
@@ -110,41 +113,47 @@ def perform_inference(request: InferenceRequest):
     
     return {"ranked_recommendations": ranked_results}
 
-def trigger_training(model_type: str):
-    """
-    Helper function to run training in a background thread to avoid blocking the server.
-    """
-    if model_type == "nerd":
-        print("--- Triggering 'nerd' model training in the background. ---")
-        trained_nerd = train_nerd_model(data_directory=TRAINING_DATA_DIR, model_save_path=NERD_MODEL_PATH)
-        trained_nerd.save(NERD_MODEL_SAVE_PATH)
-        print("--- 'Nerd' model training finished. Overwriting complete. Please restart the server to load the new model. ---")
-    elif model_type == "mba":
-        print("--- Triggering 'mba' model training in the background. ---")
-        trained_mba = train_mba_model(data_directory=TRAINING_DATA_DIR, nerd_model_path=NERD_MODEL_PATH, mba_model_save_path=MBA_MODEL_PATH)
-        trained_mba.save(MBA_MODEL_SAVE_PATH)
-        print("--- 'MBA' model training finished. Overwriting complete. Please restart the server to load the new model. ---")
+def _shutdown_server():
+    """Helper function to trigger a shutdown after a short delay."""
+    time.sleep(2)
+    os._exit(0)
 
+def run_full_training_workflow(data_directory: str):
+    """
+    This is the long-running function that will be executed in the background.
+    It runs the entire training sequence in the correct order.
+    """
+    print("\n--- (Background Task) Starting Full Training Workflow ---")
+    try:
+        # Step 1: Train Nerd
+        print("--- (Background Task) Starting 'nerd' model training... ---")
+        trained_nerd = train_nerd_model(data_directory=data_directory, model_save_path=NERD_MODEL_PATH, epochs=2, batch_size=1)
+        trained_nerd.save(NERD_MODEL_PATH)
+        print("--- (Background Task) 'Nerd' model training finished. ---")
 
-@app.post("/v1/train-nerd")
-def endpoint_train_nerd():
-    """
-    API endpoint to trigger a fine-tuning job for the nerd model.
-    The training runs in a background thread.
-    """
-    # Using a thread to avoid blocking the API while training runs.
-    training_thread = threading.Thread(target=trigger_training, args=("nerd",))
-    training_thread.start()
-    return {"message": "Nerd model training has been initiated. The new model will be available after the server is restarted."} [cite: 25, 26]
+        # Step 2: Train MBA
+        print("--- (Background Task) Starting 'mba' model training... ---")
+        trained_mba = train_mba_model(data_directory=data_directory, nerd_model_path=NERD_MODEL_PATH, mba_model_save_path=MBA_MODEL_PATH, epochs=2, batch_size=1)
+        trained_mba.save(MBA_MODEL_PATH)
+        print("--- (Background Task) 'MBA' model training finished. ---")
+        
+        # Step 3: Trigger server restart
+        print("--- (Background Task) All training complete. Triggering server restart... ---")
+        _shutdown_server()
+    except Exception as e:
+        print(f"--- (Background Task) 🔥🔥🔥 ERROR in training workflow: {e} 🔥🔥🔥")
 
-@app.post("/v1/train-mba")
-def endpoint_train_mba():
+@app.post("/v1/trigger-full-retraining-workflow")
+def endpoint_trigger_full_workflow(request: TrainingRequest, background_tasks: BackgroundTasks):
     """
-    API endpoint to trigger a fine-tuning job for the MBA model.
+    API endpoint to trigger the entire fine-tuning and restart workflow.
+    This call returns instantly and the process runs in the background.
     """
-    training_thread = threading.Thread(target=trigger_training, args=("mba",))
-    training_thread.start()
-    return {"message": "MBA model training has been initiated. The new model will be available after the server is restarted."} [cite: 25, 26]
+    print("Received request to trigger full retraining workflow. Adding to background tasks.")
+    # Add the entire, sequential workflow as a single background task.
+    background_tasks.add_task(run_full_training_workflow, request.data_directory)
+    # Return an "Accepted" response immediately.
+    return {"message": "Full training and restart workflow has been initiated in the background."}
 
 
 # --- To run this server: ---

@@ -324,37 +324,3 @@ def perform_batch_inference(
         results.append((profit[0], loss[0]))
         
     return results
-
-def _train_on_single_file(model: tf.keras.Model, file_path: Path, epochs: int, batch_size: int):
-    """
-    A helper function that encapsulates the logic for training on a single Parquet file.
-    This ensures that data is loaded and discarded from memory one file at a time.
-    """
-    # 1. Load and preprocess data for this file only.
-    x_train, y_train, x_val, y_val = load_and_preprocess_data(file_path)
-
-    # 2. Re-compile the model to reset the optimizer for this fine-tuning session.
-    model.compile(
-        optimizer='adam',
-        loss={'profit_output': 'mean_squared_error', 'loss_output': 'mean_squared_error'},
-        metrics={'profit_output': tf.keras.metrics.RootMeanSquaredError(), 'loss_output': tf.keras.metrics.RootMeanSquaredError()}
-    )
-
-    num_validation_samples = x_val['time_series_input'].shape[0]
-    if num_validation_samples > 0:
-        monitor_metric = 'val_loss'
-        validation_args = {'validation_data': (x_val, y_val)}
-    else:
-        monitor_metric = 'loss'
-        validation_args = {}
-
-    early_stopping = EarlyStopping(
-        monitor=monitor_metric, patience=10, mode='min', verbose=1, restore_best_weights=True
-    )
-    
-    # 3. Fit the model on this file's data.
-    model.fit(
-        x_train, y_train, epochs=epochs, batch_size=batch_size,
-        callbacks=[early_stopping], verbose=1, **validation_args
-    )
-    # When this function returns, x_train, y_train, etc., are cleared from memory.

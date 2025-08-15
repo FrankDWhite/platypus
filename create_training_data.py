@@ -1,4 +1,5 @@
 #!/usr/bin/python3.10
+import shutil
 import pandas as pd
 import pymongo
 from pymongo import MongoClient
@@ -10,6 +11,8 @@ import pytz
 from embedding_utils import get_ticker_encoding, get_option_type_encoding
 from mongodb_utilities import OptionsRawDataStore
 from pathlib import Path
+
+from trading_machine import trigger_daily_retrain
 
 # --- Configuration ---
 # We need to look back further to build our feature + label windows.
@@ -23,6 +26,7 @@ FEATURE_WINDOW_POINTS = 40
 LABELING_WINDOW_POINTS = 39
 
 SAVE_DIRECTORY = Path("/home/bcm/training_data")
+CURRENT_DAY_SAVE_DIRECTORY = Path("./training_data/current_day")
 
 
 def is_within_market_hours(dt_object: datetime) -> bool:
@@ -237,7 +241,17 @@ def process_daily_data():
     print(f"\nSuccessfully created {len(df)} training examples.")
     print(f"Data saved to {full_file_path}")
 
+    # if CURRENT_DAY_SAVE_DIRECTORY.exists():
+    #     shutil.rmtree(CURRENT_DAY_SAVE_DIRECTORY)
+    #     print(f"Cleaned out old data from: {CURRENT_DAY_SAVE_DIRECTORY}")
+
+    # CURRENT_DAY_SAVE_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    # current_day_file_path = CURRENT_DAY_SAVE_DIRECTORY / file_name
+    # df.to_parquet(current_day_file_path, index=False)
+    # print(f"Saved current day's training file to: {current_day_file_path}")
+
     options_db.close_connection()
+    # trigger_daily_retrain(str(CURRENT_DAY_SAVE_DIRECTORY))
 
 
 if __name__ == "__main__":
